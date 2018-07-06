@@ -3,6 +3,7 @@ import numpy as np
 import random
 import json
 import time
+import os
 
 import mxnet as mx
 from mxnet import nd
@@ -18,6 +19,10 @@ Co, kernel_size = 64, 3
 embedding_size = 3
 num_kernels1 = 16
 num_points_for_train, num_points_for_predict = 24, 12
+training_set_ratio = 0.7
+epochs = 100
+optimizer = 'adam'
+learning_rate = 1e-3
 
 def get_D(A):
     '''
@@ -131,70 +136,75 @@ class st_gcn_ijcai(nn.Block):
         out3 = self.last_temporal(out2)
         return self.fully(out3.reshape((out3.shape[0], out3.shape[1], -1)))
 
-A, X = data_preprocess()
+if __name__ == '__main__':
+    A, X = data_preprocess()
 
-indices = [(i, i + (num_points_for_train + num_points_for_predict)) for i in range(X.shape[2] - (num_points_for_train + num_points_for_predict))]
-split_line = int(X.shape[2] * 0.7)
+    indices = [(i, i + (num_points_for_train + num_points_for_predict)) for i in range(X.shape[2] - (num_points_for_train + num_points_for_predict))]
+    split_line = int(X.shape[2] * training_set_ratio)
 
-training_data, training_target = [], []
-for i, j in indices[:split_line]:
-    training_data.append(X[:, :, i: i + num_points_for_train].transpose((0,2,1)))
-    training_target.append(X[:, 0, i + num_points_for_train: j])
+    training_data, training_target = [], []
+    for i, j in indices[:split_line]:
+        training_data.append(X[:, :, i: i + num_points_for_train].transpose((0,2,1)))
+        training_target.append(X[:, 0, i + num_points_for_train: j])
 
-test_data, test_target = [], []
-for i, j in indices[split_line:]:
-    test_data.append(X[:, :, i: i + num_points_for_train].transpose((0,2,1)))
-    test_target.append(X[:, 0, i + num_points_for_train: j])
+    test_data, test_target = [], []
+    for i, j in indices[split_line:]:
+        test_data.append(X[:, :, i: i + num_points_for_train].transpose((0,2,1)))
+        test_target.append(X[:, 0, i + num_points_for_train: j])
 
-A_wave = A + nd.array(np.diag(np.ones(A.shape[0])), ctx = ctx)
-D_wave = get_D_wave(A_wave)
-D_wave_ = get_D_(D_wave)
-A_hat = nd.dot(nd.dot(D_wave_, A_wave), D_wave_)
+    A_wave = A + nd.array(np.diag(np.ones(A.shape[0])), ctx = ctx)
+    D_wave = get_D_wave(A_wave)
+    D_wave_ = get_D_(D_wave)
+    A_hat = nd.dot(nd.dot(D_wave_, A_wave), D_wave_)
 
-net = st_gcn_ijcai()
-net.initialize(ctx = ctx)
+    net = st_gcn_ijcai()
+    net.initialize(ctx = ctx)
 
-trainer = Trainer(net.collect_params(), 'adam', {'learning_rate': 1e-3})
+    trainer = Trainer(net.collect_params(), optimizer, {'learning_rate': learning_rate})
+    batch_size = 16
+    training_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(training_data, training_target), batch_size = batch_size, shuffle = True)
+    testing_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(test_data, test_target), batch_size = batch_size, shuffle = False)
 
-batch_size = 16
-training_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(training_data, training_target), batch_size = batch_size, shuffle = True)
-testing_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(test_data, test_target), batch_size = batch_size, shuffle = True)
+    if not os.path.exists('stgcn_params'):
+        os.mkdir('stgcn_params')
 
-loss_list = []
-test_loss_list = []
-for epoch in range(50):
-    t = time.time()
-    
-    loss_list_tmp = []
-    for x, y in training_dataloader:
-        with autograd.record():
+    loss_list = []
+    test_loss_list = []
+    for epoch in range(epochs):
+        t = time.time()
+        
+        loss_list_tmp = []
+        for x, y in training_dataloader:
+            with autograd.record():
+                output = net(x)
+                l = loss(output, y)
+            l.backward()
+            loss_list_tmp.append(l.asscalar())
+            trainer.step(batch_size)
+            
+        loss_list.append( sum(loss_list_tmp) / len(loss_list_tmp) )
+        
+        test_loss_list_tmp = []
+        for x, y in testing_dataloader:
             output = net(x)
-            l = loss(output, y)
-        l.backward()
-        loss_list_tmp.append(l.asscalar())
-        trainer.step(batch_size)
+            test_loss_list_tmp.append(loss(output, y).asscalar())
+            
+        test_loss_list.append( sum(test_loss_list_tmp) / len(test_loss_list_tmp) )
         
-    loss_list.append( sum(loss_list_tmp) / len(loss_list_tmp) )
-    
-    test_loss_list_tmp = []
-    for x, y in testing_dataloader:
-        output = net(x)
-        test_loss_list_tmp.append(loss(output, y).asscalar())
-        
-    test_loss_list.append( sum(test_loss_list_tmp) / len(test_loss_list_tmp) )
-    
-    print('training loss:', loss_list[-1])
-    print('testing loss:', test_loss_list[-1])
-    print('time:', time.time() - t)
-    print()
+        print('training loss(MSE):', loss_list[-1])
+        print('testing loss(MSE):', test_loss_list[-1])
+        print('time:', time.time() - t)
+        print()
 
-    with open('results.log', 'a') as f:
-        f.write('training loss: %s'%(loss_list[-1]))
-        f.write('\n')
-        f.write('testing loss: %s'%(test_loss_list[-1]))
-        f.write('\n\n')
-    
-    if (epoch+1) % 5 == 0:
-        filename = 'stgcn_params/stgcn.params_%s'%(epoch)
-        net.save_params(filename)
-    #     trainer.set_learning_rate(trainer.learning_rate * 0.7)
+        with open('results.log', 'a') as f:
+            f.write('training loss(MSE): %s'%(loss_list[-1]))
+            f.write('\n')
+            f.write('testing loss(MSE): %s'%(test_loss_list[-1]))
+            f.write('\n\n')
+        
+        if (epoch + 1) % 5 == 0:
+            filename = 'stgcn_params/stgcn.params_%s'%(epoch)
+            net.save_params(filename)
+        
+        if (epoch + 1) % 50 == 0:
+            trainer.set_learning_rate(trainer.learning_rate * 0.5)
