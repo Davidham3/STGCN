@@ -17,7 +17,7 @@ from mxnet.gluon import nn
 ctx = mx.gpu(0)
 Co, kernel_size = 64, 3
 embedding_size = 3
-num_kernels1 = 16
+num_spatial_kernels = 16
 num_points_for_train, num_points_for_predict = 24, 12
 training_set_ratio = 0.7
 epochs = 100
@@ -111,7 +111,7 @@ class stgcn_block(nn.Block):
         self.temporal1 = time_conv_block()
         self.temporal2 = time_conv_block()
         with self.name_scope():
-            self.Theta1 = self.params.get('%s-Theta1'%(name_), shape = (Co, num_kernels1))
+            self.Theta1 = self.params.get('%s-Theta1'%(name_), shape = (Co, num_spatial_kernels))
         self.batch_norm = nn.BatchNorm()
 
     def forward(self, x):
