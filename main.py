@@ -191,6 +191,7 @@ if __name__ == '__main__':
             
         test_loss_list.append( sum(test_loss_list_tmp) / len(test_loss_list_tmp) )
         
+        print('current epoch is %s'%(epoch + 1))
         print('training loss(MSE):', loss_list[-1])
         print('testing loss(MSE):', test_loss_list[-1])
         print('time:', time.time() - t)
