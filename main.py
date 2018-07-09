@@ -124,9 +124,9 @@ class stgcn_block(nn.Block):
         t3 = self.temporal2(t2)
         return self.batch_norm(t3)
 
-class st_gcn_ijcai(nn.Block):
+class STGCN_GLU(nn.Block):
     def __init__(self, **kwargs):
-        super(st_gcn_ijcai, self).__init__(**kwargs)
+        super(STGCN_GLU, self).__init__(**kwargs)
         with self.name_scope():
             self.block1 = stgcn_block('block1')
             self.block2 = stgcn_block('block2')
@@ -160,7 +160,7 @@ if __name__ == '__main__':
     D_wave_ = get_D_(D_wave)
     A_hat = nd.dot(nd.dot(D_wave_, A_wave), D_wave_)
 
-    net = st_gcn_ijcai()
+    net = STGCN_GLU()
     net.initialize(ctx = ctx)
 
     trainer = Trainer(net.collect_params(), optimizer, {'learning_rate': learning_rate})
