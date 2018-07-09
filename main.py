@@ -164,7 +164,6 @@ if __name__ == '__main__':
     net.initialize(ctx = ctx)
 
     trainer = Trainer(net.collect_params(), optimizer, {'learning_rate': learning_rate})
-    batch_size = 16
     training_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(training_data, training_target), batch_size = batch_size, shuffle = True)
     testing_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(test_data, test_target), batch_size = batch_size, shuffle = False)
 
@@ -194,6 +193,7 @@ if __name__ == '__main__':
             
         test_loss_list.append( sum(test_loss_list_tmp) / len(test_loss_list_tmp) )
         
+        print('epoch: %s'%(epoch))
         print('current epoch is %s'%(epoch + 1))
         print('training loss(MSE):', loss_list[-1])
         print('testing loss(MSE):', test_loss_list[-1])
