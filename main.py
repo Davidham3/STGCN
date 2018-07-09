@@ -16,8 +16,15 @@ from mxnet.gluon import nn
 ctx = mx.gpu(0)
 Co, kernel_size = 64, 3
 embedding_size = 3
-num_kernels1 = 16
+num_spatial_kernels = 16
 num_points_for_train, num_points_for_predict = 24, 12
+training_set_ratio = 0.85
+learning_rate = 1e-3
+optimizer = 'RMSprop'
+decay_rate = 0.7
+decay_interval = 5
+epochs = 50
+batch_size = 50
 
 def get_D(A):
     '''
@@ -106,7 +113,7 @@ class stgcn_block(nn.Block):
         self.temporal1 = time_conv_block()
         self.temporal2 = time_conv_block()
         with self.name_scope():
-            self.Theta1 = self.params.get('%s-Theta1'%(name_), shape = (Co, num_kernels1))
+            self.Theta1 = self.params.get('%s-Theta1'%(name_), shape = (Co, num_spatial_kernels))
         self.batch_norm = nn.BatchNorm()
 
     def forward(self, x):
@@ -134,7 +141,7 @@ class st_gcn_ijcai(nn.Block):
 A, X = data_preprocess()
 
 indices = [(i, i + (num_points_for_train + num_points_for_predict)) for i in range(X.shape[2] - (num_points_for_train + num_points_for_predict))]
-split_line = int(X.shape[2] * 0.7)
+split_line = int(X.shape[2] * training_set_ratio)
 
 training_data, training_target = [], []
 for i, j in indices[:split_line]:
@@ -154,15 +161,14 @@ A_hat = nd.dot(nd.dot(D_wave_, A_wave), D_wave_)
 net = st_gcn_ijcai()
 net.initialize(ctx = ctx)
 
-trainer = Trainer(net.collect_params(), 'adam', {'learning_rate': 1e-3})
+trainer = Trainer(net.collect_params(), optimizer, {'learning_rate': learning_rate})
 
-batch_size = 16
 training_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(training_data, training_target), batch_size = batch_size, shuffle = True)
 testing_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(test_data, test_target), batch_size = batch_size, shuffle = True)
 
 loss_list = []
 test_loss_list = []
-for epoch in range(50):
+for epoch in range(epochs):
     t = time.time()
     
     loss_list_tmp = []
@@ -197,4 +203,5 @@ for epoch in range(50):
     if (epoch+1) % 5 == 0:
         filename = 'stgcn_params/stgcn.params_%s'%(epoch)
         net.save_params(filename)
-    #     trainer.set_learning_rate(trainer.learning_rate * 0.7)
+    if (epoch+1) % decay_interval == 0:
+        trainer.set_learning_rate(trainer.learning_rate * decay_rate)
