@@ -97,48 +97,6 @@ def data_preprocess():
 def loss(output, target):
     return nd.sum((output - target) ** 2) / np.prod(output.shape)
 
-class time_conv_block(nn.Block):
-    def __init__(self, **kwargs):
-        super(time_conv_block, self).__init__(**kwargs)
-        self.conv1 = nn.Conv2D(Co, kernel_size, padding = 1, activation = 'relu', layout = 'NHWC')
-        self.conv2 = nn.Conv2D(Co, kernel_size, padding = 1, activation = 'relu', layout = 'NHWC')
-        self.conv3 = nn.Conv2D(Co, kernel_size = 1, layout = 'NHWC')
-    
-    def forward(self, x):
-        t = self.conv1(x) + nd.sigmoid(self.conv2(x))
-        return nd.relu(t + self.conv3(x))
-
-class stgcn_block(nn.Block):
-    def __init__(self, name_, **kwargs):
-        super(stgcn_block, self).__init__(**kwargs)
-        self.temporal1 = time_conv_block()
-        self.temporal2 = time_conv_block()
-        with self.name_scope():
-            self.Theta1 = self.params.get('%s-Theta1'%(name_), shape = (Co, num_spatial_kernels))
-        self.batch_norm = nn.BatchNorm()
-
-    def forward(self, x):
-        t = self.temporal1(x)
-        lfs = nd.dot(A_hat, t.transpose((1,0,2,3))).transpose((1,0,2,3))
-        t2 = nd.relu(nd.dot(lfs, self.Theta1.data()))
-        t3 = self.temporal2(t2)
-        return self.batch_norm(t3)
-
-class STGCN_GLU(nn.Block):
-    def __init__(self, **kwargs):
-        super(STGCN_GLU, self).__init__(**kwargs)
-        with self.name_scope():
-            self.block1 = stgcn_block('block1')
-            self.block2 = stgcn_block('block2')
-            self.last_temporal = time_conv_block()
-            self.fully = nn.Dense(num_points_for_predict, flatten = False)
-    
-    def forward(self, x):
-        out1 = self.block1(x)
-        out2 = self.block2(out1)
-        out3 = self.last_temporal(out2)
-        return self.fully(out3.reshape((out3.shape[0], out3.shape[1], -1)))
-
 if __name__ == '__main__':
     A, X = data_preprocess()
 
