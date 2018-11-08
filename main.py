@@ -4,6 +4,7 @@ import random
 import json
 import time
 import os
+import pandas as pd
 
 import mxnet as mx
 from mxnet import nd
@@ -14,22 +15,52 @@ from mxnet.gluon import Parameter
 from mxnet.gluon import ParameterDict
 from mxnet.gluon import nn
 
+##########
+# configuration part
+
+# choose which device do you want to use, if you don't have a gpu device, you can set ctx = mx.cpu()
 ctx = mx.gpu(0)
+
+# number of vertices in your graph
+num_of_vertices = 307
+
+# we use a Gaussian kernel to normalize the adjacency matrix, epsilon is the threshold
+epsilon = 0.5
+
+# number of filters in time convolution, kernel_size is the size of these filters
 Co, kernel_size = 64, 3
+
+# number of features or the embedding size of your input
 embedding_size = 3
+
+# number of spatial filters
 num_spatial_kernels = 16
+
+# how many points you want to train the model and how many you want to predict
 num_points_for_train, num_points_for_predict = 24, 12
-training_set_ratio = 0.85
+
+# learning rate
 learning_rate = 1e-3
+
+# optimizer
 optimizer = 'RMSprop'
+
+# decay rate
 decay_rate = 0.7
+
+# decay interval
 decay_interval = 5
-epochs = 50
+
+# training epochs
+epochs = 10
+
+# batch_size
 batch_size = 50
+##########
 
 def get_D(A):
     '''
-    get degree matrix of A
+    get degree matrix of A, A is the adjacency matrix
     '''
     D = nd.zeros_like(A, ctx = ctx)
     for i in range(D.shape[0]):
@@ -38,7 +69,7 @@ def get_D(A):
 
 def get_D_(D):
     '''
-    get D^(-frac{1}{2})
+    get D^(-\frac{1}{2})
     '''
     D_ = nd.zeros_like(D, dtype = 'np.float32', ctx = ctx)
     for i in range(D_.shape[0]):
@@ -68,33 +99,66 @@ def get_D_wave(W_wave):
 
 def data_preprocess():
     '''
-    A is the adjacency matrix of the road graph
-    X is the feature matrix
+    Returns
+    ----------
+    A: Adjacency matrix
+    
+    X: Graph signal matrix
     '''
-    with open('remainID5min.json', 'r') as f:
+    
+    # distance information between vertices in the graph
+    distance = pd.read_csv('data/distance.csv')
+
+    # initialize an adjacency matrix of the graph with 0
+    A = np.zeros((num_of_vertices, num_of_vertices))
+    
+    # put distances into the corresponding position
+    for x, y, dis in distance.values:
+        x_index = int(x)
+        y_index = int(y)
+        A[x_index, y_index] = dis
+        A[y_index, x_index] = dis
+
+    # compute the variance of the all distances which does not equal zero
+    tmp = A.flatten()
+    var = np.var(tmp[tmp!=0])
+
+    # normalization
+    A = np.exp(- (A ** 2) / var)
+
+    # drop the value less than threshold
+    A[A < epsilon] = 0
+    
+    # copy the value to mxnet ndarray
+    A = nd.array(A, ctx = ctx)
+    
+    # preprocessing graph signal data
+    with open('data/graph_signal_data_small.txt', 'r') as f:
         data = json.loads(f.read().strip())
-        
-    indices = sorted([int(i[:i.find(',')]) for i in data.keys()])
-    indices_dict = {i: index for index, i in enumerate(indices)}
+
+    # initialize the graph signal matrix, shape is (num_of_vertices, num_of_features, num_of_samples)
+    X = nd.empty(shape = (num_of_vertices,  # num_of_vertices
+                          len(data[list(data.keys())[0]].keys()),  # num_of_features
+                          len(list(data[list(data.keys())[0]].values())[0])),  # num_of_samples
+                 ctx = ctx)
     
-    new_data = {indices_dict[int(key[:key.find(',')])]: value for key, value in data.items()}
-    
-    with open('thre3.5twoPointIndex.txt', 'r') as f:
-        t = (list(map(int, i.strip().split(','))) for i in f.readlines())
-    
-    A = nd.zeros(shape = (len(indices), len(indices)), ctx = ctx)
-    for x, y in t:
-        A[x, y] = 1.0
-        
-    X = nd.empty(shape = (len(indices), 3, 16992), ctx = ctx)
-    for i in range(len(indices)):
-        data = new_data[i]
-        X[i, 0, :] = nd.array(data['flow'], ctx = ctx)
-        X[i, 1, :] = nd.array(data['occupy'], ctx = ctx)
-        X[i, 2, :] = nd.array(data['speed'], ctx = ctx)
+    # i is the index of the vertice
+    for i in range(num_of_vertices):
+        X[i, 0, :] = nd.array(data[str(i)]['flow'], ctx = ctx)
+        X[i, 1, :] = nd.array(data[str(i)]['occupy'], ctx = ctx)
+        X[i, 2, :] = nd.array(data[str(i)]['speed'], ctx = ctx)
     return A, X
 
 def loss(output, target):
+    '''
+    loss function: MSE
+    
+    Parameters
+    ----------
+    output: mx.ndarray, output of the network, shape is (batch_size, num_of_vertices, num_points_for_predicting)
+    
+    target: mx.ndarray, target value of the prediction, shape is (batch_size, num_of_vertices, num_points_for_predicting)
+    '''
     return nd.sum((output - target) ** 2) / np.prod(output.shape)
 
 class time_conv_block(nn.Block):
@@ -114,7 +178,7 @@ class stgcn_block(nn.Block):
         self.temporal1 = time_conv_block()
         self.temporal2 = time_conv_block()
         with self.name_scope():
-            self.Theta1 = self.params.get('%s-Theta1'%(name_), shape = (Co, num_kernels1))
+            self.Theta1 = self.params.get('%s-Theta1'%(name_), shape = (Co, num_spatial_kernels))
         
         self.batch_norm = nn.BatchNorm()
 
@@ -140,76 +204,135 @@ class STGCN_GLU(nn.Block):
         out3 = self.last_temporal(out2)
         return self.fully(out3.reshape((out3.shape[0], out3.shape[1], -1)))
 
-if __name__ == '__main__':
-    A, X = data_preprocess()
+def make_dataset(graph_signal_matrix):
+    '''
+    Parameters
+    ----------
+    graph_signal_matrix: graph signal matrix, shape is (num_of_vertices, num_of_features, num_of_samples)
+    
+    Returns
+    ----------
+    features: list[graph_signal_matrix], shape of each element is (num_of_vertices, num_of_features, num_points_for_training)
+    
+    target: list[graph_signal_matrix], shape of each element is (num_of_vertices, num_points_for_predicting)
+    '''
+    
+    # generate the beginning index and the ending index of a sample, which contains (num_points_for_training + num_points_for_predicting) points
+    indices = [(i, i + (num_points_for_train + num_points_for_predict)) for i in range(graph_signal_matrix.shape[2] - (num_points_for_train + num_points_for_predict) + 1)]
+    
+    # save samples
+    features, target = [], []
+    for i, j in indices:
+        features.append(graph_signal_matrix[:, :, i: i + num_points_for_train].transpose((0,2,1)))
+        target.append(graph_signal_matrix[:, 0, i + num_points_for_train: j])
+    
+    return features, target
 
-    indices = [(i, i + (num_points_for_train + num_points_for_predict)) for i in range(X.shape[2] - (num_points_for_train + num_points_for_predict))]
-    split_line = int(X.shape[2] * training_set_ratio)
-
-    training_data, training_target = [], []
-    for i, j in indices[:split_line]:
-        training_data.append(X[:, :, i: i + num_points_for_train].transpose((0,2,1)))
-        training_target.append(X[:, 0, i + num_points_for_train: j])
-
-    test_data, test_target = [], []
-    for i, j in indices[split_line:]:
-        test_data.append(X[:, :, i: i + num_points_for_train].transpose((0,2,1)))
-        test_target.append(X[:, 0, i + num_points_for_train: j])
-
-    A_wave = A + nd.array(np.diag(np.ones(A.shape[0])), ctx = ctx)
-    D_wave = get_D_wave(A_wave)
-    D_wave_ = get_D_(D_wave)
-    A_hat = nd.dot(nd.dot(D_wave_, A_wave), D_wave_)
-
-    net = STGCN_GLU()
-    net.initialize(ctx = ctx)
-
-    trainer = Trainer(net.collect_params(), optimizer, {'learning_rate': learning_rate})
-    training_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(training_data, training_target), batch_size = batch_size, shuffle = True)
-    testing_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(test_data, test_target), batch_size = batch_size, shuffle = False)
-
-    if not os.path.exists('stgcn_params'):
-        os.mkdir('stgcn_params')
-
-    loss_list = []
+def train_model(net, training_dataloader, validation_dataloader, testing_dataloader):
+    '''
+    train the model
+    
+    Parameters
+    ----------
+    net: model which has been initialized
+    
+    training_dataloader, validation_dataloader, testing_dataloader: gluon.data.dataloader.DataLoader
+    
+    Returns
+    ----------
+    train_loss_list: list(float), which contains loss values of training process
+    
+    val_loss_list: list(float), which contains loss values of validation process
+    
+    test_loss_list: list(float), which contains loss values of testing process
+    
+    '''
+    train_loss_list = []
+    val_loss_list = []
     test_loss_list = []
     for epoch in range(epochs):
         t = time.time()
-        
-        loss_list_tmp = []
+
+        train_loss_list_tmp = []
         for x, y in training_dataloader:
             with autograd.record():
                 output = net(x)
                 l = loss(output, y)
             l.backward()
-            loss_list_tmp.append(l.asscalar())
+            train_loss_list_tmp.append(l.asscalar())
             trainer.step(batch_size)
-            
-        loss_list.append( sum(loss_list_tmp) / len(loss_list_tmp) )
-        
+
+        train_loss_list.append( sum(train_loss_list_tmp) / len(train_loss_list_tmp) )
+
+        val_loss_list_tmp = []
+        for x, y in validation_dataloader:
+            output = net(x)
+            val_loss_list_tmp.append(loss(output, y).asscalar())
+
+        val_loss_list.append( sum(val_loss_list_tmp) / len(val_loss_list_tmp) )
+
         test_loss_list_tmp = []
         for x, y in testing_dataloader:
             output = net(x)
             test_loss_list_tmp.append(loss(output, y).asscalar())
-            
+
         test_loss_list.append( sum(test_loss_list_tmp) / len(test_loss_list_tmp) )
-        
-        print('epoch: %s'%(epoch))
+
         print('current epoch is %s'%(epoch + 1))
-        print('training loss(MSE):', loss_list[-1])
+        print('training loss(MSE):', train_loss_list[-1])
+        print('validation loss(MSE):', val_loss_list[-1])
         print('testing loss(MSE):', test_loss_list[-1])
         print('time:', time.time() - t)
         print()
 
         with open('results.log', 'a') as f:
-            f.write('training loss(MSE): %s'%(loss_list[-1]))
+            f.write('training loss(MSE): %s'%(train_loss_list[-1]))
+            f.write('\n')
+            f.write('validation loss(MSE): %s'%(val_loss_list[-1]))
             f.write('\n')
             f.write('testing loss(MSE): %s'%(test_loss_list[-1]))
             f.write('\n\n')
-        
+
         if (epoch + 1) % 5 == 0:
             filename = 'stgcn_params/stgcn.params_%s'%(epoch)
-            net.save_params(filename)
-        
+            net.save_parameters(filename)
+
         if (epoch + 1) % decay_interval == 0:
             trainer.set_learning_rate(trainer.learning_rate * decay_rate)
+    
+    return train_loss_list, val_loss_list, test_loss_list
+
+if __name__ == "__main__":
+    A, X = data_preprocess()
+
+    # training: validation: testing = 6: 2: 2
+    split_line1 = int(X.shape[2] * 0.6)
+    split_line2 = int(X.shape[2] * 0.8)
+
+    train_original_data = X[:, :, :split_line1]
+    val_original_data = X[:, :, split_line1: split_line2]
+    test_original_data = X[:, :, split_line2:]
+
+    training_data, training_target = make_dataset(train_original_data)
+    val_data, val_target = make_dataset(val_original_data)
+    testing_data, testing_target = make_dataset(test_original_data)
+
+    # pre-computing
+    A_wave = A + nd.array(np.diag(np.ones(A.shape[0])), ctx = ctx)
+    D_wave = get_D_wave(A_wave)
+    D_wave_ = get_D_(D_wave)
+    A_hat = nd.dot(nd.dot(D_wave_, A_wave), D_wave_)
+
+    # model initialization
+    net = STGCN_GLU()
+    net.initialize(ctx = ctx)
+
+    trainer = Trainer(net.collect_params(), optimizer, {'learning_rate': learning_rate})
+    training_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(training_data, training_target), batch_size = batch_size, shuffle = True)
+    validation_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(val_data, val_target), batch_size = batch_size, shuffle = False)
+    testing_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(testing_data, testing_target), batch_size = batch_size, shuffle = False)
+
+    if not os.path.exists('stgcn_params'):
+        os.mkdir('stgcn_params')
+
+    train_loss_list, val_loss_list, test_loss_list = train_model(net, training_dataloader, validation_dataloader, testing_dataloader)
