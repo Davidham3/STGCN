@@ -18,7 +18,7 @@ from mxnet.gluon import nn
 ##########
 # configuration part
 
-# choose which device do you want to use, if you don't have a gpu device, you can set ctx = mx.cpu()
+# choose which device you want to use, if you want to use CPU, set ctx = mx.cpu()
 ctx = mx.gpu(0)
 
 # number of vertices in your graph
