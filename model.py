@@ -9,6 +9,25 @@ from mxnet import gluon
 import pandas as pd
 from lib.utils import *
 
+class LayerNorm(nn.Block):
+    def __init__(self, eps = 1e-5, **kwargs):
+        super(LayerNorm, self).__init__(**kwargs)
+        self.eps = eps
+        self.gamma = self.params.get('gamma', allow_deferred_init = True, init = mx.init.One())
+        self.beta = self.params.get('beta', allow_deferred_init = True, init = mx.init.Zero())
+    
+    def forward(self, x):
+        if autograd.is_training():
+            _, *tmp = x.shape
+            self.gamma.shape = [1] + tmp
+            self.gamma._finish_deferred_init()
+            self.beta.shape = [1] + tmp
+            self.beta._finish_deferred_init()
+        
+        mu = x.mean(axis = 1, keepdims = True)
+        sigma = nd.sqrt(((x - mu) ** 2).mean(axis = 1, keepdims = True))
+        return ((x - mu) / (sigma + self.eps)) * self.gamma.data() + self.beta.data()
+
 class cheb_conv(nn.Block):
     '''
     K-order chebyshev graph convolution
@@ -101,7 +120,7 @@ class ST_block(nn.Block):
             self.time_conv1 = temporal_conv_layer(num_of_time_conv_filters1, K_t)
             self.cheb_conv = cheb_conv(num_of_cheb_filters, K, cheb_polys)
             self.time_conv2 = temporal_conv_layer(num_of_time_conv_filters2, K_t)
-            self.bn = nn.BatchNorm()
+            self.bn = LayerNorm()
             
     def forward(self, x):
         '''

@@ -3,6 +3,8 @@ This is an implementation of [Spatio-Temporal Graph Convolutional Networks: A De
 
 # requirements
 mxnet >= 1.3.0
+pandas
+numpy
 
 # Dataset
 dataset comes from [PEMS](http://pems.dot.ca.gov/), we sampled a little from Bay area. You can get sampled data from "data" folder.
