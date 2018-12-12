@@ -27,15 +27,6 @@ num_of_vertices = 307
 # we use a Gaussian kernel to normalize the adjacency matrix, epsilon is the threshold
 epsilon = 0.5
 
-# number of filters in time convolution, kernel_size is the size of these filters
-Co, kernel_size = 64, 3
-
-# number of features or the embedding size of your input
-embedding_size = 3
-
-# number of spatial filters
-num_spatial_kernels = 16
-
 # how many points you want to train the model and how many you want to predict
 num_points_for_train, num_points_for_predict = 12, 1
 
