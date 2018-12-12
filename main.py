@@ -11,15 +11,15 @@ from mxnet import nd
 from mxnet import autograd
 from mxnet import gluon
 from mxnet.gluon import Trainer
-from mxnet.gluon import Parameter
-from mxnet.gluon import ParameterDict
-from mxnet.gluon import nn
+
+from lib.utils import *
+from model import STGCN
 
 ##########
 # configuration part
 
 # choose which device you want to use, if you want to use CPU, set ctx = mx.cpu()
-ctx = mx.gpu(0)
+ctx = mx.cpu()
 
 # number of vertices in your graph
 num_of_vertices = 307
@@ -37,10 +37,10 @@ embedding_size = 3
 num_spatial_kernels = 16
 
 # how many points you want to train the model and how many you want to predict
-num_points_for_train, num_points_for_predict = 24, 12
+num_points_for_train, num_points_for_predict = 12, 1
 
 # learning rate
-learning_rate = 1e-3
+learning_rate = 1e-2
 
 # optimizer
 optimizer = 'RMSprop'
@@ -57,45 +57,6 @@ epochs = 10
 # batch_size
 batch_size = 50
 ##########
-
-def get_D(A):
-    '''
-    get degree matrix of A, A is the adjacency matrix
-    '''
-    D = nd.zeros_like(A, ctx = ctx)
-    for i in range(D.shape[0]):
-        D[i, i] = nd.sum(A[:, i])
-    return D
-
-def get_D_(D):
-    '''
-    get D^(-\frac{1}{2})
-    '''
-    D_ = nd.zeros_like(D, dtype = 'np.float32', ctx = ctx)
-    for i in range(D_.shape[0]):
-        if D[i, i] == 0:
-            D_[i, i] = 1e-9 ** (-0.5)
-        else:
-            D_[i, i] = D[i, i] ** (-0.5)
-    return D_
-
-def get_L(A):
-    '''
-    get Laplacian, L = I_n−D^{−1/2}AD^{−1/2}
-    '''
-    D = get_D(A)
-    D_ = get_D_(D)
-    L = nd.array(np.diag(np.ones(A.shape[0])), ctx = ctx) - nd.dot(nd.dot(D_, A), D_)
-    return L
-
-def get_D_wave(W_wave):
-    '''
-    get normalized D
-    '''
-    t = nd.zeros_like(W_wave, ctx = ctx)
-    for i in range(W_wave.shape[0]):
-        t[i, i] = W_wave.sum(axis = 0)[i]
-    return t
 
 def data_preprocess():
     '''
@@ -149,61 +110,6 @@ def data_preprocess():
         X[i, 2, :] = nd.array(data[str(i)]['speed'], ctx = ctx)
     return A, X
 
-def loss(output, target):
-    '''
-    loss function: MSE
-    
-    Parameters
-    ----------
-    output: mx.ndarray, output of the network, shape is (batch_size, num_of_vertices, num_points_for_predicting)
-    
-    target: mx.ndarray, target value of the prediction, shape is (batch_size, num_of_vertices, num_points_for_predicting)
-    '''
-    return nd.sum((output - target) ** 2) / np.prod(output.shape)
-
-class time_conv_block(nn.Block):
-    def __init__(self, **kwargs):
-        super(time_conv_block, self).__init__(**kwargs)
-        self.conv1 = nn.Conv2D(Co, (1, kernel_size), activation = 'relu', layout = 'NHWC')
-        self.conv2 = nn.Conv2D(Co, (1, kernel_size), activation = 'relu', layout = 'NHWC')
-        self.conv3 = nn.Conv2D(Co, kernel_size = (1, 3), layout = 'NHWC')
-    
-    def forward(self, x):
-        t = self.conv1(x) + nd.sigmoid(self.conv2(x))
-        return nd.relu(t + self.conv3(x))
-
-class stgcn_block(nn.Block):
-    def __init__(self, name_, **kwargs):
-        super(stgcn_block, self).__init__(**kwargs)
-        self.temporal1 = time_conv_block()
-        self.temporal2 = time_conv_block()
-        with self.name_scope():
-            self.Theta1 = self.params.get('%s-Theta1'%(name_), shape = (Co, num_spatial_kernels))
-        
-        self.batch_norm = nn.BatchNorm()
-
-    def forward(self, x):
-        t = self.temporal1(x)
-        lfs = nd.dot(A_hat, t.transpose((1,0,2,3))).transpose((1,0,2,3))
-        t2 = nd.relu(nd.dot(lfs, self.Theta1.data()))
-        t3 = self.temporal2(t2)
-        return self.batch_norm(t3)
-
-class STGCN_GLU(nn.Block):
-    def __init__(self, **kwargs):
-        super(STGCN_GLU, self).__init__(**kwargs)
-        with self.name_scope():
-            self.block1 = stgcn_block('block1')
-            self.block2 = stgcn_block('block2')
-            self.last_temporal = time_conv_block()
-            self.fully = nn.Dense(num_points_for_predict, flatten = False)
-    
-    def forward(self, x):
-        out1 = self.block1(x)
-        out2 = self.block2(out1)
-        out3 = self.last_temporal(out2)
-        return self.fully(out3.reshape((out3.shape[0], out3.shape[1], -1)))
-
 def make_dataset(graph_signal_matrix):
     '''
     Parameters
@@ -212,21 +118,21 @@ def make_dataset(graph_signal_matrix):
     
     Returns
     ----------
-    features: list[graph_signal_matrix], shape of each element is (num_of_vertices, num_of_features, num_points_for_training)
+    features: mx.ndarray, shape is (num_of_samples, num_points_for_training, num_of_vertices, num_of_features)
     
-    target: list[graph_signal_matrix], shape of each element is (num_of_vertices, num_points_for_predicting)
+    target: mx.ndarray, shape is (num_of_samples, num_of_vertices, num_points_for_prediction)
     '''
     
-    # generate the beginning index and the ending index of a sample, which contains (num_points_for_training + num_points_for_predicting) points
+    # generate the beginning index and the ending index of a sample, which bounds (num_points_for_training + num_points_for_predicting) points
     indices = [(i, i + (num_points_for_train + num_points_for_predict)) for i in range(graph_signal_matrix.shape[2] - (num_points_for_train + num_points_for_predict) + 1)]
     
     # save samples
     features, target = [], []
     for i, j in indices:
-        features.append(graph_signal_matrix[:, :, i: i + num_points_for_train].transpose((0,2,1)))
-        target.append(graph_signal_matrix[:, 0, i + num_points_for_train: j])
+        features.append(graph_signal_matrix[:, :, i: i + num_points_for_train].transpose((0,2,1)).expand_dims(0))
+        target.append(graph_signal_matrix[:, 0, i + num_points_for_train: j].expand_dims(0))
     
-    return features, target
+    return nd.concat(*features, dim = 0).transpose((0, 3, 1, 2)), nd.concat(*target, dim = 0)
 
 def train_model(net, training_dataloader, validation_dataloader, testing_dataloader):
     '''
@@ -257,9 +163,9 @@ def train_model(net, training_dataloader, validation_dataloader, testing_dataloa
         for x, y in training_dataloader:
             with autograd.record():
                 output = net(x)
-                l = loss(output, y)
+                l = loss_function(output, y)
             l.backward()
-            train_loss_list_tmp.append(l.asscalar())
+            train_loss_list_tmp.append(l.mean().asnumpy()[0])
             trainer.step(batch_size)
 
         train_loss_list.append( sum(train_loss_list_tmp) / len(train_loss_list_tmp) )
@@ -267,14 +173,14 @@ def train_model(net, training_dataloader, validation_dataloader, testing_dataloa
         val_loss_list_tmp = []
         for x, y in validation_dataloader:
             output = net(x)
-            val_loss_list_tmp.append(loss(output, y).asscalar())
+            val_loss_list_tmp.append(loss_function(output, y).mean().asnumpy()[0])
 
         val_loss_list.append( sum(val_loss_list_tmp) / len(val_loss_list_tmp) )
 
         test_loss_list_tmp = []
         for x, y in testing_dataloader:
             output = net(x)
-            test_loss_list_tmp.append(loss(output, y).asscalar())
+            test_loss_list_tmp.append(loss_function(output, y).mean().asnumpy()[0])
 
         test_loss_list.append( sum(test_loss_list_tmp) / len(test_loss_list_tmp) )
 
@@ -305,6 +211,9 @@ def train_model(net, training_dataloader, validation_dataloader, testing_dataloa
 if __name__ == "__main__":
     A, X = data_preprocess()
 
+    L_tilde = scaled_Laplacian(A.asnumpy())
+    cheb_polys = [nd.array(i, ctx = ctx) for i in cheb_polynomial(L_tilde, 3)]
+
     # training: validation: testing = 6: 2: 2
     split_line1 = int(X.shape[2] * 0.6)
     split_line2 = int(X.shape[2] * 0.8)
@@ -317,15 +226,33 @@ if __name__ == "__main__":
     val_data, val_target = make_dataset(val_original_data)
     testing_data, testing_target = make_dataset(test_original_data)
 
-    # pre-computing
-    A_wave = A + nd.array(np.diag(np.ones(A.shape[0])), ctx = ctx)
-    D_wave = get_D_wave(A_wave)
-    D_wave_ = get_D_(D_wave)
-    A_hat = nd.dot(nd.dot(D_wave_, A_wave), D_wave_)
+    print(training_data.shape, training_target.shape)
+    print(val_data.shape, val_target.shape)
+    print(testing_data.shape, testing_target.shape)
 
     # model initialization
-    net = STGCN_GLU()
+    backbones = [
+        {
+            'num_of_time_conv_filters1': 32,
+            'num_of_time_conv_filters2': 64,
+            'K_t': 3,
+            'num_of_cheb_filters': 32,
+            'K': 1,
+            'cheb_polys': cheb_polys
+        },
+        {
+            'num_of_time_conv_filters1': 32,
+            'num_of_time_conv_filters2': 128,
+            'K_t': 3,
+            'num_of_cheb_filters': 32,
+            'K': 1,
+            'cheb_polys': cheb_polys
+        }
+    ]
+    net = STGCN(backbones, 128)
     net.initialize(ctx = ctx)
+
+    loss_function = gluon.loss.L2Loss()
 
     trainer = Trainer(net.collect_params(), optimizer, {'learning_rate': learning_rate})
     training_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(training_data, training_target), batch_size = batch_size, shuffle = True)
