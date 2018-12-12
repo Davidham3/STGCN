@@ -26,6 +26,24 @@ Using
 ```python
 from model import STGCN
 
+backbones = [
+    {
+        'num_of_time_conv_filters1': 32,
+        'num_of_time_conv_filters2': 64,
+        'K_t': 3,
+        'num_of_cheb_filters': 32,
+        'K': 1,
+        'cheb_polys': cheb_polys
+    },
+    {
+        'num_of_time_conv_filters1': 32,
+        'num_of_time_conv_filters2': 128,
+        'K_t': 3,
+        'num_of_cheb_filters': 32,
+        'K': 1,
+        'cheb_polys': cheb_polys
+    }
+]
 net = STGCN(backbones, 128)
 net.initialize(ctx = mx.cpu()) # or mx.gpu(0)
 ```
