@@ -5,6 +5,7 @@ This is an implementation of [Spatio-Temporal Graph Convolutional Networks: A De
 mxnet >= 1.3.0  
 pandas  
 numpy
+sklearn
 
 # Usage
 ```
