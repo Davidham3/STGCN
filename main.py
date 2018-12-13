@@ -1,6 +1,5 @@
 # -*- coding:utf-8 -*-
 import numpy as np
-import random
 import json
 import time
 import os
@@ -14,6 +13,8 @@ from mxnet.gluon import Trainer
 
 from lib.utils import *
 from model import STGCN
+
+from sklearn.preprocessing import StandardScaler
 
 ##########
 # configuration part
@@ -46,16 +47,16 @@ decay_interval = 5
 epochs = 10
 
 # batch_size
-batch_size = 50
+batch_size = 32
 ##########
 
 def data_preprocess():
     '''
     Returns
     ----------
-    A: Adjacency matrix
+    A: Adjacency matrix, np.ndarray, shape is (num_of_vertices, num_of_vertices)
     
-    X: Graph signal matrix
+    X: Graph signal matrix, np.ndarray, shape is (num_of_vertices, num_of_features, num_of_samples)
     '''
     
     # distance information between vertices in the graph
@@ -81,37 +82,34 @@ def data_preprocess():
     # drop the value less than threshold
     A[A < epsilon] = 0
     
-    # copy the value to mxnet ndarray
-    A = nd.array(A, ctx = ctx)
-    
     # preprocessing graph signal data
     with open('data/graph_signal_data_small.txt', 'r') as f:
         data = json.loads(f.read().strip())
 
     # initialize the graph signal matrix, shape is (num_of_vertices, num_of_features, num_of_samples)
-    X = nd.empty(shape = (num_of_vertices,  # num_of_vertices
+    X = np.empty(shape = (num_of_vertices,  # num_of_vertices
                           len(data[list(data.keys())[0]].keys()),  # num_of_features
                           len(list(data[list(data.keys())[0]].values())[0])),  # num_of_samples
-                 ctx = ctx)
+                )
     
     # i is the index of the vertice
     for i in range(num_of_vertices):
-        X[i, 0, :] = nd.array(data[str(i)]['flow'], ctx = ctx)
-        X[i, 1, :] = nd.array(data[str(i)]['occupy'], ctx = ctx)
-        X[i, 2, :] = nd.array(data[str(i)]['speed'], ctx = ctx)
+        X[i, 0, :] = np.array(data[str(i)]['flow'])
+        X[i, 1, :] = np.array(data[str(i)]['occupy'])
+        X[i, 2, :] = np.array(data[str(i)]['speed'])
     return A, X
 
 def make_dataset(graph_signal_matrix):
     '''
     Parameters
     ----------
-    graph_signal_matrix: graph signal matrix, shape is (num_of_vertices, num_of_features, num_of_samples)
+    graph_signal_matrix: np.ndarray, graph signal matrix, shape is (num_of_vertices, num_of_features, num_of_samples)
     
     Returns
     ----------
-    features: mx.ndarray, shape is (num_of_samples, num_points_for_training, num_of_vertices, num_of_features)
+    features: np.ndarray, shape is (num_of_samples, num_of_features, num_of_vertices, num_points_for_training)
     
-    target: mx.ndarray, shape is (num_of_samples, num_of_vertices, num_points_for_prediction)
+    target: np.ndarray, shape is (num_of_samples, num_of_vertices, num_points_for_prediction)
     '''
     
     # generate the beginning index and the ending index of a sample, which bounds (num_points_for_training + num_points_for_predicting) points
@@ -120,10 +118,13 @@ def make_dataset(graph_signal_matrix):
     # save samples
     features, target = [], []
     for i, j in indices:
-        features.append(graph_signal_matrix[:, :, i: i + num_points_for_train].transpose((0,2,1)).expand_dims(0))
-        target.append(graph_signal_matrix[:, 0, i + num_points_for_train: j].expand_dims(0))
+        features.append(graph_signal_matrix[:, :, i: i + num_points_for_train].transpose((1, 0, 2)))
+        target.append(graph_signal_matrix[:, 0, i + num_points_for_train: j])
     
-    return nd.concat(*features, dim = 0).transpose((0, 3, 1, 2)), nd.concat(*target, dim = 0)
+    features = np.concatenate([np.expand_dims(i, 0) for i in features], axis = 0)
+    target = np.concatenate([np.expand_dims(i, 0) for i in target], axis = 0)
+    
+    return features, target
 
 def train_model(net, training_dataloader, validation_dataloader, testing_dataloader):
     '''
@@ -202,24 +203,45 @@ def train_model(net, training_dataloader, validation_dataloader, testing_dataloa
 if __name__ == "__main__":
     A, X = data_preprocess()
 
-    L_tilde = scaled_Laplacian(A.asnumpy())
+    L_tilde = scaled_Laplacian(A)
     cheb_polys = [nd.array(i, ctx = ctx) for i in cheb_polynomial(L_tilde, 3)]
 
     # training: validation: testing = 6: 2: 2
     split_line1 = int(X.shape[2] * 0.6)
     split_line2 = int(X.shape[2] * 0.8)
 
-    train_original_data = X[:, :, :split_line1]
+    train_original_data = X[:, :, : split_line1]
     val_original_data = X[:, :, split_line1: split_line2]
-    test_original_data = X[:, :, split_line2:]
+    test_original_data = X[:, :, split_line2: ]
 
     training_data, training_target = make_dataset(train_original_data)
     val_data, val_target = make_dataset(val_original_data)
     testing_data, testing_target = make_dataset(test_original_data)
 
-    print(training_data.shape, training_target.shape)
-    print(val_data.shape, val_target.shape)
-    print(testing_data.shape, testing_target.shape)
+    # Z-score preprocessing
+    assert num_of_vertices == training_data.shape[2]
+    assert num_points_for_train == training_data.shape[3]
+    _, num_of_features, _, _ = training_data.shape
+
+    transformer = StandardScaler()
+    training_data_norm = transformer.fit_transform(training_data.reshape(training_data.shape[0], -1))\
+        .reshape(training_data.shape[0], num_of_features, num_of_vertices, num_points_for_train)
+    val_data_norm = transformer.transform(val_data.reshape(val_data.shape[0], -1))\
+        .reshape(val_data.shape[0], num_of_features, num_of_vertices, num_points_for_train)
+    testing_data_norm = transformer.transform(testing_data.reshape(testing_data.shape[0], -1))\
+        .reshape(testing_data.shape[0], num_of_features, num_of_vertices, num_points_for_train)
+
+    training_data_norm = nd.array(training_data_norm, ctx = ctx)
+    val_data_norm = nd.array(val_data_norm, ctx = ctx)
+    testing_data_norm = nd.array(testing_data_norm, ctx = ctx)
+
+    training_target = nd.array(training_target, ctx = ctx)
+    val_target = nd.array(val_target, ctx = ctx)
+    testing_target = nd.array(testing_target, ctx = ctx)
+
+    print('training data shape:', training_data_norm.shape, training_target.shape)
+    print('validation data shape:', val_data_norm.shape, val_target.shape)
+    print('testing data shape:', testing_data_norm.shape, testing_target.shape)
 
     # model initialization
     backbones = [
@@ -246,9 +268,9 @@ if __name__ == "__main__":
     loss_function = gluon.loss.L2Loss()
 
     trainer = Trainer(net.collect_params(), optimizer, {'learning_rate': learning_rate})
-    training_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(training_data, training_target), batch_size = batch_size, shuffle = True)
-    validation_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(val_data, val_target), batch_size = batch_size, shuffle = False)
-    testing_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(testing_data, testing_target), batch_size = batch_size, shuffle = False)
+    training_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(training_data_norm, training_target), batch_size = batch_size, shuffle = True)
+    validation_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(val_data_norm, val_target), batch_size = batch_size, shuffle = False)
+    testing_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(testing_data_norm, testing_target), batch_size = batch_size, shuffle = False)
 
     if not os.path.exists('stgcn_params'):
         os.mkdir('stgcn_params')
