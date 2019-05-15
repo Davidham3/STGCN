@@ -1,12 +1,13 @@
 # -*- coding:utf-8 -*-
 
+import pandas as pd
+
 import mxnet as mx
 from mxnet.gluon import nn
 from mxnet import nd
 from mxnet import autograd
 from mxnet import gluon
 
-import pandas as pd
 from lib.utils import *
 
 class cheb_conv(nn.Block):
@@ -31,7 +32,7 @@ class cheb_conv(nn.Block):
         
         # shape of theta is (self.K, num_of_features, num_of_filters)
         with self.name_scope():
-            self.Theta = self.params.get('Theta', allow_deferred_init = True)
+            self.Theta = self.params.get('Theta', allow_deferred_init=True)
     
     def forward(self, x):
         '''
@@ -59,7 +60,7 @@ class cheb_conv(nn.Block):
             # shape is (batch_size, num_of_features, num_of_vertices)
             graph_signal = x[:, :, :, time_step]
             
-            output = nd.zeros(shape = (self.num_of_filters, num_of_vertices, batch_size), ctx = x.context)
+            output = nd.zeros(shape=(self.num_of_filters, num_of_vertices, batch_size), ctx=x.context)
             
             for k in range(self.K):
                 
@@ -70,7 +71,7 @@ class cheb_conv(nn.Block):
                 theta_k = self.Theta.data()[k]
                 
                 # shape of rhs is (num_of_features, num_of_vertices, batch_size)
-                rhs = nd.concat(*[nd.dot(graph_signal[idx], T_k).expand_dims(-1) for idx in range(batch_size)], dim = -1)
+                rhs = nd.concat(*[nd.dot(graph_signal[idx], T_k).expand_dims(-1) for idx in range(batch_size)], dim=-1)
                 
                 output = output + nd.dot(theta_k, rhs)
             
@@ -78,7 +79,7 @@ class cheb_conv(nn.Block):
             outputs.append(output.transpose((2, 0, 1)).expand_dims(-1))
         
         # concatenate all GCN output and activate them
-        return nd.relu(nd.concat(*outputs, dim = -1))
+        return nd.relu(nd.concat(*outputs, dim=-1))
     
 class temporal_conv_layer(nn.Block):
     '''
@@ -100,8 +101,8 @@ class temporal_conv_layer(nn.Block):
             
         self.num_of_filters = num_of_filters
         with self.name_scope():
-            self.conv = nn.Conv2D(channels = num_of_filters, kernel_size = (1, K_t))
-            self.residual_conv = nn.Conv2D(channels = num_of_filters // 2, kernel_size = (1, K_t))
+            self.conv = nn.Conv2D(channels=num_of_filters, kernel_size=(1, K_t))
+            self.residual_conv = nn.Conv2D(channels=num_of_filters // 2, kernel_size=(1, K_t))
         
     def forward(self, x):
         '''
@@ -151,7 +152,7 @@ class ST_block(nn.Block):
             self.time_conv1 = temporal_conv_layer(num_of_time_conv_filters1, K_t)
             self.cheb_conv = cheb_conv(num_of_cheb_filters, K, cheb_polys)
             self.time_conv2 = temporal_conv_layer(num_of_time_conv_filters2, K_t)
-            self.ln = nn.LayerNorm(axis = 1)
+            self.ln = nn.LayerNorm(axis=1)
             
     def forward(self, x):
         '''
@@ -180,8 +181,8 @@ class STGCN(nn.Block):
         # extra three convolutional structure to map output into label space
         with self.name_scope():
             self.last_time_conv = temporal_conv_layer(num_of_last_time_conv_filters, 4)
-            self.final_conv = nn.Conv2D(channels = 128, kernel_size = (1, 1), activation = 'sigmoid')
-            self.conv_output = nn.Conv2D(channels = 1, kernel_size = (1, 1))
+            self.final_conv = nn.Conv2D(channels=128, kernel_size=(1, 1), activation='sigmoid')
+            self.conv_output = nn.Conv2D(channels=1, kernel_size = (1, 1))
         
     def forward(self, x):
         '''
@@ -201,7 +202,7 @@ class STGCN(nn.Block):
     
 if __name__ == "__main__":
     ctx = mx.cpu()
-    distance_df = pd.read_csv('data/distance.csv', dtype={'from': 'int', 'to': 'int'})
+    distance_df = pd.read_csv('data/test_data1/distance.csv', dtype={'from': 'int', 'to': 'int'})
     num_of_vertices = 307
     A = get_adjacency_matrix(distance_df, num_of_vertices, 0.1)
     L_tilde = scaled_Laplacian(A)
@@ -225,5 +226,5 @@ if __name__ == "__main__":
         }
     ]
     net = STGCN(backbones, 128)
-    net.initialize(ctx = ctx)
-    print(net(nd.random_uniform(shape = (16, 1, num_of_vertices, 12))).shape)
+    net.initialize(ctx=ctx)
+    print(net(nd.random_uniform(shape=(16, 1, num_of_vertices, 12))).shape)

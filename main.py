@@ -1,9 +1,12 @@
 # -*- coding:utf-8 -*-
-import numpy as np
+
 import json
 import time
 import os
+
+import numpy as np
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 
 import mxnet as mx
 from mxnet import nd
@@ -14,8 +17,6 @@ from mxnet.gluon import Trainer
 from lib.utils import *
 from model import STGCN
 
-from sklearn.preprocessing import StandardScaler
-
 ##########
 # configuration part
 
@@ -24,6 +25,9 @@ ctx = mx.cpu()
 
 # number of vertices in your graph
 num_of_vertices = 307
+
+# orders of chebyshev polynomials
+orders_of_cheb = 3
 
 # we use a Gaussian kernel to normalize the adjacency matrix, epsilon is the threshold
 epsilon = 0.5
@@ -50,7 +54,7 @@ epochs = 10
 batch_size = 32
 ##########
 
-def data_preprocess():
+def data_preprocess(adj_filename):
     '''
     Returns
     ----------
@@ -60,7 +64,7 @@ def data_preprocess():
     '''
     
     # distance information between vertices in the graph
-    distance = pd.read_csv('data/distance.csv')
+    distance = pd.read_csv(adj_filename)
 
     # initialize an adjacency matrix of the graph with 0
     A = np.zeros((num_of_vertices, num_of_vertices))
@@ -99,7 +103,7 @@ def data_preprocess():
         X[i, 2, :] = np.array(data[str(i)]['speed'])
     return A, X
 
-def make_dataset(graph_signal_matrix):
+def build_dataset(graph_signal_matrix):
     '''
     Parameters
     ----------
@@ -113,7 +117,8 @@ def make_dataset(graph_signal_matrix):
     '''
     
     # generate the beginning index and the ending index of a sample, which bounds (num_points_for_training + num_points_for_predicting) points
-    indices = [(i, i + (num_points_for_train + num_points_for_predict)) for i in range(graph_signal_matrix.shape[2] - (num_points_for_train + num_points_for_predict) + 1)]
+    indices = [(i, i + (num_points_for_train + num_points_for_predict)) 
+                for i in range(graph_signal_matrix.shape[2] - (num_points_for_train + num_points_for_predict) + 1)]
     
     # save samples
     features, target = [], []
@@ -121,8 +126,8 @@ def make_dataset(graph_signal_matrix):
         features.append(graph_signal_matrix[:, :, i: i + num_points_for_train].transpose((1, 0, 2)))
         target.append(graph_signal_matrix[:, 0, i + num_points_for_train: j])
     
-    features = np.concatenate([np.expand_dims(i, 0) for i in features], axis = 0)
-    target = np.concatenate([np.expand_dims(i, 0) for i in target], axis = 0)
+    features = np.concatenate([np.expand_dims(i, 0) for i in features], axis=0)
+    target = np.concatenate([np.expand_dims(i, 0) for i in target], axis=0)
     
     return features, target
 
@@ -201,10 +206,10 @@ def train_model(net, training_dataloader, validation_dataloader, testing_dataloa
     return train_loss_list, val_loss_list, test_loss_list
 
 if __name__ == "__main__":
-    A, X = data_preprocess()
+    A, X = data_preprocess('data/test_data1/distance.csv')
 
     L_tilde = scaled_Laplacian(A)
-    cheb_polys = [nd.array(i, ctx = ctx) for i in cheb_polynomial(L_tilde, 3)]
+    cheb_polys = [nd.array(i, ctx=ctx) for i in cheb_polynomial(L_tilde, orders_of_cheb)]
 
     # training: validation: testing = 6: 2: 2
     split_line1 = int(X.shape[2] * 0.6)
@@ -214,9 +219,9 @@ if __name__ == "__main__":
     val_original_data = X[:, :, split_line1: split_line2]
     test_original_data = X[:, :, split_line2: ]
 
-    training_data, training_target = make_dataset(train_original_data)
-    val_data, val_target = make_dataset(val_original_data)
-    testing_data, testing_target = make_dataset(test_original_data)
+    training_data, training_target = build_dataset(train_original_data)
+    val_data, val_target = build_dataset(val_original_data)
+    testing_data, testing_target = build_dataset(test_original_data)
 
     # Z-score preprocessing
     assert num_of_vertices == training_data.shape[2]
@@ -263,14 +268,14 @@ if __name__ == "__main__":
         }
     ]
     net = STGCN(backbones, 128)
-    net.initialize(ctx = ctx)
+    net.initialize(ctx=ctx)
 
     loss_function = gluon.loss.L2Loss()
 
     trainer = Trainer(net.collect_params(), optimizer, {'learning_rate': learning_rate})
-    training_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(training_data_norm, training_target), batch_size = batch_size, shuffle = True)
-    validation_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(val_data_norm, val_target), batch_size = batch_size, shuffle = False)
-    testing_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(testing_data_norm, testing_target), batch_size = batch_size, shuffle = False)
+    training_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(training_data_norm, training_target), batch_size=batch_size, shuffle=True)
+    validation_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(val_data_norm, val_target), batch_size=batch_size, shuffle=False)
+    testing_dataloader = gluon.data.DataLoader(gluon.data.ArrayDataset(testing_data_norm, testing_target), batch_size=batch_size, shuffle=False)
 
     if not os.path.exists('stgcn_params'):
         os.mkdir('stgcn_params')

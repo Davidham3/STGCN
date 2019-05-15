@@ -76,6 +76,8 @@ def get_adjacency_matrix(distance_df, num_of_vertices, normalized_k=0.1):
 
     # Calculates the standard deviation as theta.
     # compute the variance of the all distances which does not equal zero
+    mask = (A == 0)
+
     tmp = A.flatten()
     var = np.var(tmp[tmp!=0])
 
@@ -84,5 +86,6 @@ def get_adjacency_matrix(distance_df, num_of_vertices, normalized_k=0.1):
 
     # drop the value less than threshold
     A[A < normalized_k] = 0
+    A[mask] = 0
     
     return A
