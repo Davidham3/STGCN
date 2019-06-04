@@ -117,13 +117,13 @@ training_data_norm = transformer.fit_transform(
 val_data_norm = transformer.transform(
     val_data.reshape(val_data.shape[0], -1))\
     .reshape(val_data.shape[0], num_of_features, num_of_vertices, 12)
-testing_data_norm = transformer.transform(
-    testing_data.reshape(testing_data.shape[0], -1))\
-    .reshape(testing_data.shape[0], num_of_features, num_of_vertices, 12)
+
+mean_ = nd.array(transformer.mean_, ctx=ctx)
+std_ = nd.array(transformer.scale_, ctx=ctx)
 
 training_data_norm = nd.array(training_data_norm, ctx=ctx)
 val_data_norm = nd.array(val_data_norm, ctx=ctx)
-testing_data_norm = nd.array(testing_data_norm, ctx=ctx)
+testing_data = nd.array(testing_data, ctx=ctx)
 
 training_target = nd.array(training_target, ctx=ctx)
 val_target = nd.array(val_target, ctx=ctx)
@@ -132,7 +132,7 @@ testing_target = nd.array(testing_target, ctx=ctx)
 print('training data shape:',
       training_data_norm.shape, training_target.shape)
 print('validation data shape:', val_data_norm.shape, val_target.shape)
-print('testing data shape:', testing_data_norm.shape, testing_target.shape)
+print('testing data shape:', testing_data.shape, testing_target.shape)
 
 # model initialization
 backbones = [
@@ -167,7 +167,7 @@ validation_dataloader = gluon.data.DataLoader(
     gluon.data.ArrayDataset(val_data_norm, val_target),
     batch_size=batch_size, shuffle=False)
 testing_dataloader = gluon.data.DataLoader(
-    gluon.data.ArrayDataset(testing_data_norm, testing_target),
+    gluon.data.ArrayDataset(testing_data, testing_target),
     batch_size=batch_size, shuffle=False)
 
 if os.path.exists(args.logdir):
@@ -189,5 +189,6 @@ sw = SummaryWriter(args.logdir, flush_secs=5)
 
 utils.train_model(net, sw, 0, 0,
                   training_dataloader, validation_dataloader,
-                  testing_dataloader, epochs, loss_function,
-                  trainer, decay_interval, decay_rate)
+                  testing_dataloader, mean_, std_, epochs,
+                  loss_function, trainer,
+                  decay_interval, decay_rate)

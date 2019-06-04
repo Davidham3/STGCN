@@ -186,7 +186,7 @@ def build_dataset(graph_signal_matrix, num_points_for_train,
     return features, target
 
 
-def predict(net, x, num_points_for_train, num_points_for_predict):
+def predict(net, x, num_points_for_train, num_points_for_predict, mean_, std_):
     '''
     net
 
@@ -202,18 +202,24 @@ def predict(net, x, num_points_for_train, num_points_for_predict):
     mx.ndarray, shape is
         (batch_size, num_of_vertices, num_of_training_point)
     '''
+    (batch_size, num_of_features,
+     num_of_vertices, num_of_training_point) = x.shape
     predictions = []
     for _ in range(num_points_for_predict):
         # pylint: disable=invalid-sequence-index
         p = nd.concat(x, *predictions, dim=-1)[:, :, :, -num_points_for_train:]
+        p = (p.reshape(batch_size, -1) - mean_) / std_
+        p = p.reshape(batch_size, num_of_features,
+                      num_of_vertices, num_of_training_point)
         predictions.append(net(p).expand_dims(1))
     return nd.concat(*predictions, dim=-1).squeeze(axis=1)
 
 
 def train_model(net, sw, train_count, val_count,
                 training_dataloader, validation_dataloader,
-                testing_dataloader, epochs, loss_function,
-                trainer, decay_interval=None, decay_rate=None):
+                testing_dataloader, mean_, std_,
+                epochs, loss_function, trainer,
+                decay_interval=None, decay_rate=None):
     '''
     train the model
 
@@ -254,7 +260,7 @@ def train_model(net, sw, train_count, val_count,
                       value=sum(val_loss_list) / len(val_loss_list),
                       global_step=val_count)
 
-        predictions, ground_truth = zip(*[(predict(net, x, 12, 12).asnumpy(),
+        predictions, ground_truth = zip(*[(predict(net, x, 12, 12, mean_, std_).asnumpy(),
                                           y.asnumpy())
                                           for x, y in testing_dataloader])
         predictions = np.concatenate(predictions, axis=0)
