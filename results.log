@@ -1,0 +1,84 @@
+training loss(MSE): 20265.19921875
+validation loss(MSE): 26410.96875
+testing loss(MSE): 57564.43359375
+
+training loss(MSE): 20243.056640625
+validation loss(MSE): 26383.349609375
+testing loss(MSE): 57515.78515625
+
+training loss(MSE): 20216.556640625
+validation loss(MSE): 26354.701171875
+testing loss(MSE): 57465.62890625
+
+training loss(MSE): 20189.63671875
+validation loss(MSE): 26320.279296875
+testing loss(MSE): 57403.93359375
+
+training loss(MSE): 20157.5546875
+validation loss(MSE): 26279.9296875
+testing loss(MSE): 57331.31640625
+
+training loss(MSE): 20120.0078125
+validation loss(MSE): 26235.28125
+testing loss(MSE): 57250.84765625
+
+training loss(MSE): 20078.4453125
+validation loss(MSE): 26187.408203125
+testing loss(MSE): 57164.546875
+
+training loss(MSE): 20033.828125
+validation loss(MSE): 26137.794921875
+testing loss(MSE): 57075.0625
+
+training loss(MSE): 19987.564453125
+validation loss(MSE): 26088.744140625
+testing loss(MSE): 56986.5625
+
+training loss(MSE): 19941.82421875
+validation loss(MSE): 26042.501953125
+testing loss(MSE): 56903.109375
+
+training loss(MSE): 19898.712890625
+validation loss(MSE): 26000.83203125
+testing loss(MSE): 56827.875
+
+training loss(MSE): 19859.8671875
+validation loss(MSE): 25964.701171875
+testing loss(MSE): 56762.62109375
+
+training loss(MSE): 19826.1875
+validation loss(MSE): 25934.14453125
+testing loss(MSE): 56707.40234375
+
+training loss(MSE): 19797.70703125
+validation loss(MSE): 25908.46875
+testing loss(MSE): 56660.97265625
+
+training loss(MSE): 19773.7734375
+validation loss(MSE): 25886.66796875
+testing loss(MSE): 56621.52734375
+
+training loss(MSE): 19753.453125
+validation loss(MSE): 25867.767578125
+testing loss(MSE): 56587.32421875
+
+training loss(MSE): 19735.83984375
+validation loss(MSE): 25850.966796875
+testing loss(MSE): 56556.91015625
+
+training loss(MSE): 19720.1796875
+validation loss(MSE): 25835.607421875
+testing loss(MSE): 56529.09765625
+
+training loss(MSE): 19705.869140625
+validation loss(MSE): 25821.193359375
+testing loss(MSE): 56502.98828125
+
+training loss(MSE): 19692.439453125
+validation loss(MSE): 25807.3515625
+testing loss(MSE): 56477.9140625
+
+training loss(MSE): 19679.54296875
+validation loss(MSE): 25793.814453125
+testing loss(MSE): 56453.38671875
+

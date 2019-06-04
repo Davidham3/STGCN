@@ -1,2 +1,7 @@
 *.pyc
 __pycache__/
+stgcn_params/
+logs/
+.vscode/
+.ipynb_checkpoints/
+docker/
