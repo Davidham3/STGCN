@@ -7,11 +7,11 @@ dataset comes from [STGCN_IJCAI-18](https://github.com/VeritasYin/STGCN_IJCAI-18
 
 # Requirements
 
-mxnet >= 1.4.1
+mxnet >= 1.4.1 and scipy
 
 or
 
-Docker
+Docker with [nvidia-docker](https://github.com/NVIDIA/nvidia-docker)
 
 # Usage
 
