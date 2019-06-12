@@ -1,2 +1,7 @@
+.vscode/
 *.pyc
 __pycache__/
+*.csv
+logdir/
+test_logs/
+params/
